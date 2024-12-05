@@ -53,34 +53,26 @@ def analyze_trade(data):
         is_buy_trade = not data['m']
         current_time = int(data['T'])
         
-        # Force une alerte test
-        alert = {
-            'symbol': symbol,
-            'price': price,
-            'change': 0.00,  # Change fictif pour le test
-            'type': 'TEST',
-            'action': 'TEST',
-            'tradeType': 'ACHAT' if is_buy_trade else 'VENTE',
-            'timestamp': datetime.fromtimestamp(current_time/1000).isoformat()
-        }
+        change = calculate_change(symbol, price, current_time)
         
-        # Après le premier envoi, on restaure la fonction originale
-        def restore_original():
-            global analyze_trade
-            analyze_trade = original_analyze_trade
-        
-        # Programme la restauration pour le prochain appel
-        restore_original()
-        
-        return alert
+        # Détecter pump ou dump
+        if change >= PUMP_THRESHOLD or change <= DUMP_THRESHOLD:
+            alert = {
+                'symbol': symbol,
+                'price': price,
+                'change': round(change, 2),
+                'type': 'PUMP' if change > 0 else 'DUMP',
+                'action': 'VENDRE' if change > 0 and is_buy_trade else 'ACHETER' if change < 0 and not is_buy_trade else 'ATTENDRE',
+                'tradeType': 'ACHAT' if is_buy_trade else 'VENTE',
+                'timestamp': datetime.fromtimestamp(current_time/1000).isoformat()
+            }
+            
+            return alert
             
     except Exception as e:
         print(f"Erreur lors de l'analyse du trade: {e}")
     
     return None
-
-# Sauvegarder la fonction originale
-original_analyze_trade = analyze_trade
 
 def get_trading_pairs():
     pairs = CRYPTO_PAIRS.strip().split(',')
