@@ -1,0 +1,114 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "authentication": "none",
+        "httpMethod": "POST",
+        "path": "binancewh",
+        "options": {
+          "responseMode": "lastNode",
+          "responseData": "allEntries",
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        },
+        "responseCode": 200
+      },
+      "name": "Binance",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const PUMP_THRESHOLD = 5;\nconst DUMP_THRESHOLD = -5;\nconst TIME_WINDOW = 5 * 60 * 1000;\n\nlet priceHistory = {};\n\nfunction calculateChange(symbol, currentPrice) {\n    if (!priceHistory[symbol]) {\n        priceHistory[symbol] = {\n            prices: [currentPrice],\n            lastCheck: Date.now()\n        };\n        return 0;\n    }\n\n    const history = priceHistory[symbol];\n    const now = Date.now();\n    \n    history.prices = history.prices.filter(p => \n        (now - history.lastCheck) <= TIME_WINDOW\n    );\n    \n    history.prices.push(currentPrice);\n    history.lastCheck = now;\n    \n    const oldPrice = history.prices[0];\n    const percentChange = ((currentPrice - oldPrice) / oldPrice) * 100;\n    \n    return percentChange;\n}\n\n// Récupérer les données du body\nconst data = $input.body;\nconst symbol = data.s;\nconst price = parseFloat(data.p);\nconst change = calculateChange(symbol, price);\n\nif (change >= PUMP_THRESHOLD || change <= DUMP_THRESHOLD) {\n    return {\n        json: {\n            symbol,\n            price,\n            change,\n            type: change > 0 ? 'PUMP' : 'DUMP',\n            timestamp: new Date().toISOString()\n        }\n    };\n}\n\nreturn null;"
+      },
+      "name": "Analyse Prix",
+      "type": "n8n-nodes-base.code",
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.change}}",
+              "value2": true,
+              "operation": "exists"
+            }
+          ]
+        }
+      },
+      "name": "Filtre Alertes",
+      "type": "n8n-nodes-base.if",
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=YOUR_WEBHOOK_URL",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "message",
+              "value": "=⚠️ {{$json.type}} détecté sur {{$json.symbol}} !\nVariation: {{$json.change}}%\nPrix actuel: {{$json.price}} USDT"
+            }
+          ]
+        }
+      },
+      "name": "Webhook",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [850, 300]
+    }
+  ],
+  "connections": {
+    "Binance Webhook": {
+      "main": [
+        [
+          {
+            "node": "Analyse Prix",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyse Prix": {
+      "main": [
+        [
+          {
+            "node": "Filtre Alertes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filtre Alertes": {
+      "main": [
+        [
+          {
+            "node": "Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+} 
