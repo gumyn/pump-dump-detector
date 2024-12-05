@@ -3,13 +3,84 @@ import websocket
 import json
 import requests
 from dotenv import load_dotenv
+from datetime import datetime
 
 # Charger les variables d'environnement
 load_dotenv()
 
-# Récupérer l'URL du webhook et la liste des cryptos depuis les variables d'environnement
+# Configuration
+PUMP_THRESHOLD = 5  # 5% de hausse
+DUMP_THRESHOLD = -5  # 5% de baisse
+TIME_WINDOW = 5 * 60 * 1000  # 5 minutes en millisecondes
+
+# Stockage de l'historique des prix
+price_history = {}
+
+# Récupérer l'URL du webhook et la liste des cryptos
 N8N_WEBHOOK_URL = os.getenv('N8N_WEBHOOK_URL')
 CRYPTO_PAIRS = os.getenv('CRYPTO_PAIRS', 'BTCUSDT,ETHUSDT,BNBUSDT,ADAUSDT,DOGEUSDT')
+
+def calculate_change(symbol, current_price, current_time):
+    """Calcule la variation de prix pour une crypto donnée"""
+    if symbol not in price_history:
+        price_history[symbol] = {
+            'prices': [current_price],
+            'lastCheck': current_time
+        }
+        return 0
+
+    history = price_history[symbol]
+    
+    # Nettoyer l'historique plus ancien que TIME_WINDOW
+    history['prices'] = [p for p in history['prices'] 
+                        if (current_time - history['lastCheck']) <= TIME_WINDOW]
+    
+    # Ajouter le nouveau prix
+    history['prices'].append(current_price)
+    history['lastCheck'] = current_time
+    
+    # Calculer la variation
+    old_price = history['prices'][0]
+    percent_change = ((current_price - old_price) / old_price) * 100
+    
+    return percent_change
+
+def analyze_trade(data):
+    """Analyse un trade pour détecter un pump ou dump"""
+    try:
+        symbol = data['s']
+        price = float(data['p'])
+        is_buy_trade = not data['m']
+        current_time = int(data['T'])
+        
+        # Force une alerte test
+        alert = {
+            'symbol': symbol,
+            'price': price,
+            'change': 0.00,  # Change fictif pour le test
+            'type': 'TEST',
+            'action': 'TEST',
+            'tradeType': 'ACHAT' if is_buy_trade else 'VENTE',
+            'timestamp': datetime.fromtimestamp(current_time/1000).isoformat()
+        }
+        
+        # Après le premier envoi, on restaure la fonction originale
+        def restore_original():
+            global analyze_trade
+            analyze_trade = original_analyze_trade
+        
+        # Programme la restauration pour le prochain appel
+        restore_original()
+        
+        return alert
+            
+    except Exception as e:
+        print(f"Erreur lors de l'analyse du trade: {e}")
+    
+    return None
+
+# Sauvegarder la fonction originale
+original_analyze_trade = analyze_trade
 
 def get_trading_pairs():
     pairs = CRYPTO_PAIRS.strip().split(',')
@@ -17,42 +88,41 @@ def get_trading_pairs():
 
 def on_message(ws, message):
     try:
-        # Convertir le message en JSON
         data = json.loads(message)
         
-        # Envoyer les données au webhook n8n avec les bons headers
-        headers = {
-            'Content-Type': 'application/json'
-        }
+        # Analyser le trade
+        alert = analyze_trade(data)
         
-        print(f"Envoi vers {N8N_WEBHOOK_URL}")
-        print(f"Données: {json.dumps(data, indent=2)}")
-        print(f"Headers: {headers}")
-        
-        response = requests.post(
-            N8N_WEBHOOK_URL, 
-            json=data,
-            headers=headers
-        )
-        
-        print(f"Status Code: {response.status_code}")
-        print(f"Réponse: {response.text}")
-        
-        if response.status_code != 200:
-            print(f"Erreur HTTP {response.status_code}: {response.text}")
-        else:
-            print(f"Données envoyées avec succès pour {data.get('s', 'inconnu')}")
+        # Si une alerte est générée et qu'une URL webhook est configurée, l'envoyer
+        if alert and N8N_WEBHOOK_URL:
+            print("\n" + "="*50)
+            print(f"⚠️ {alert['type']} détecté sur {alert['symbol']} !")
+            print(f"Variation: {alert['change']}%")
+            print(f"Prix actuel: {alert['price']} USDT")
+            print(f"Type de trade: {alert['tradeType']}")
+            print(f"Action suggérée: {alert['action']}")
+            print("="*50)
+            
+            headers = {'Content-Type': 'application/json'}
+            print(f"\nEnvoi de l'alerte à {N8N_WEBHOOK_URL}")
+            response = requests.post(N8N_WEBHOOK_URL, json=alert, headers=headers)
+            print(f"Statut de la réponse: {response.status_code}")
+            
+            if response.status_code != 200:
+                print(f"Erreur lors de l'envoi de l'alerte: {response.status_code}")
+                print(f"Réponse: {response.text}")
+            else:
+                print("Alerte envoyée avec succès !")
+            print("="*50 + "\n")
             
     except Exception as e:
-        print(f"Erreur lors de l'envoi au webhook: {e}")
-        print(f"Message reçu: {message}")
+        print(f"Erreur lors du traitement du message: {e}")
 
 def on_error(ws, error):
     print(f"Erreur WebSocket: {error}")
 
 def on_close(ws, close_status_code, close_msg):
     print("WebSocket Connection Closed")
-    # Tentative de reconnexion
     connect_websocket()
 
 def on_open(ws):
@@ -78,5 +148,6 @@ def connect_websocket():
 
 if __name__ == "__main__":
     print("Démarrage du service de surveillance Binance")
-    print(f"Paires configurées: {CRYPTO_PAIRS}")
+    if not N8N_WEBHOOK_URL:
+        print("⚠️ N8N_WEBHOOK_URL non configurée - les alertes ne seront pas envoyées")
     connect_websocket() 
