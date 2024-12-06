@@ -13,7 +13,9 @@ load_dotenv()
 app = Flask(__name__)
 
 # Variables globales
-N8N_WEBHOOK_URL = os.getenv('N8N_WEBHOOK_URL')
+TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
+# N8N_WEBHOOK_URL = os.getenv('N8N_WEBHOOK_URL')  # Commenté
 CRYPTO_PAIRS = os.getenv('CRYPTO_PAIRS', 'BTCUSDT').strip().split(',')
 PUMP_THRESHOLD = 5
 DUMP_THRESHOLD = -5
@@ -43,6 +45,32 @@ def calculate_change(symbol, current_price):
     old_price = history['prices'][0]
     return ((current_price - old_price) / old_price) * 100
 
+def send_telegram_alert(message):
+    """Envoie une alerte via Telegram"""
+    if not TELEGRAM_BOT_TOKEN:
+        print("⚠️ TELEGRAM_BOT_TOKEN non configuré")
+        return False
+        
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    data = {
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": message,
+        "parse_mode": "HTML"
+    }
+    
+    try:
+        response = requests.post(url, json=data)
+        if response.status_code == 200:
+            print("✅ Message Telegram envoyé")
+            return True
+        else:
+            print(f"❌ Erreur Telegram: {response.status_code}")
+            print(response.text)
+            return False
+    except Exception as e:
+        print(f"❌ Erreur lors de l'envoi Telegram: {e}")
+        return False
+
 def on_message(ws, message):
     """Gère les messages reçus du WebSocket"""
     try:
@@ -61,30 +89,23 @@ def on_message(ws, message):
         
         # Détecter pump/dump
         if change >= PUMP_THRESHOLD or change <= DUMP_THRESHOLD:
-            alert = {
-                'symbol': symbol,
-                'price': price,
-                'change': round(change, 2),
-                'type': 'PUMP' if change > 0 else 'DUMP',
-                'action': 'VENDRE' if change > 0 else 'ACHETER',
-                'timestamp': datetime.now().isoformat()
-            }
+            # Créer le message d'alerte
+            alert_message = (
+                f"⚠️ <b>{'PUMP' if change > 0 else 'DUMP'} détecté!</b>\n\n"
+                f"💱 Symbole: {symbol}\n"
+                f"📈 Variation: {change:.2f}%\n"
+                f"💰 Prix: {price} USDT\n"
+                f"📊 Type: {'ACHAT' if is_buy else 'VENTE'}\n"
+                f"🎯 Action suggérée: {'VENDRE' if change > 0 else 'ACHETER'}\n"
+                f"⏰ {datetime.now().strftime('%H:%M:%S')}"
+            )
             
-            # Envoyer l'alerte
-            if N8N_WEBHOOK_URL:
-                print(f"\n{'='*50}")
-                print(f"⚠️ {alert['type']} sur {symbol}")
-                print(f"Variation: {change:.2f}%")
-                print(f"Prix: {price} USDT")
-                print(f"Action: {alert['action']}")
-                
-                response = requests.post(
-                    N8N_WEBHOOK_URL,
-                    json=alert,
-                    headers={'Content-Type': 'application/json'}
-                )
-                print(f"Envoi alerte: {'✅' if response.status_code == 200 else '❌'}")
-                print(f"{'='*50}\n")
+            print(f"\n{'='*50}")
+            print(alert_message)
+            print(f"{'='*50}\n")
+            
+            # Envoyer via Telegram au lieu de n8n
+            send_telegram_alert(alert_message)
                 
     except Exception as e:
         print(f"Erreur: {e}")
@@ -125,25 +146,17 @@ def start_websocket():
 @app.route('/test')
 def test_alert():
     """Endpoint de test"""
-    if not N8N_WEBHOOK_URL:
-        return "N8N_WEBHOOK_URL non configurée", 400
-        
-    test_alert = {
-        'symbol': 'BTCUSDT',
-        'price': 50000,
-        'change': 5.5,
-        'type': 'TEST',
-        'action': 'TEST',
-        'timestamp': datetime.now().isoformat()
-    }
-    
-    response = requests.post(
-        N8N_WEBHOOK_URL,
-        json=test_alert,
-        headers={'Content-Type': 'application/json'}
+    test_message = (
+        "🧪 <b>TEST ALERTE</b>\n\n"
+        "💱 Symbole: BTCUSDT\n"
+        "📈 Variation: +5.5%\n"
+        "💰 Prix: 50000 USDT\n"
+        "📊 Type: TEST\n"
+        "⏰ " + datetime.now().strftime('%H:%M:%S')
     )
     
-    return "Test envoyé" if response.status_code == 200 else "Erreur", response.status_code
+    success = send_telegram_alert(test_message)
+    return "Test envoyé" if success else "Erreur", 200 if success else 500
 
 @app.route('/state')
 def get_state():
