@@ -97,7 +97,7 @@ def on_message(ws, message):
             
             headers = {'Content-Type': 'application/json'}
             print(f"\nEnvoi de l'alerte à {N8N_WEBHOOK_URL}")
-            # response = requests.post(N8N_WEBHOOK_URL, json=alert, headers=headers)
+            response = requests.post(N8N_WEBHOOK_URL, json=alert, headers=headers)
             print(f"Statut de la réponse: {response.status_code}")
             
             if response.status_code != 200:
