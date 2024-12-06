@@ -3,6 +3,7 @@ FROM python:3.9-slim
 WORKDIR /app
 
 # Copier les fichiers nécessaires
+COPY ./templates/ ./templates/
 COPY requirements.txt .
 COPY app.py .
 
