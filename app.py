@@ -138,8 +138,32 @@ def connect_websocket():
     ws.on_open = on_open
     ws.run_forever(ping_interval=30, ping_timeout=10)
 
+def send_startup_notification():
+    """Envoie une notification de démarrage à n8n"""
+    if N8N_WEBHOOK_URL:
+        startup_message = {
+            'type': 'STARTUP',
+            'message': 'Service de surveillance Binance démarré',
+            'timestamp': datetime.now().isoformat(),
+            'pairs_surveillees': CRYPTO_PAIRS
+        }
+        
+        try:
+            headers = {'Content-Type': 'application/json'}
+            response = requests.post(N8N_WEBHOOK_URL, json=startup_message, headers=headers)
+            
+            if response.status_code == 200:
+                print("✅ Notification de démarrage envoyée avec succès")
+            else:
+                print(f"❌ Erreur lors de l'envoi de la notification de démarrage: {response.status_code}")
+                
+        except Exception as e:
+            print(f"❌ Erreur lors de l'envoi de la notification de démarrage: {e}")
+
 if __name__ == "__main__":
     print("Démarrage du service de surveillance Binance")
     if not N8N_WEBHOOK_URL:
         print("⚠️ N8N_WEBHOOK_URL non configurée - les alertes ne seront pas envoyées")
+    else:
+        send_startup_notification()
     connect_websocket() 
