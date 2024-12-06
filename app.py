@@ -223,6 +223,58 @@ def health_check():
     """Endpoint simple pour vérifier que le service fonctionne"""
     return 'OK', 200
 
+@app.route('/test')
+def test_alert():
+    """Endpoint pour simuler une alerte de pump/dump"""
+    test_data = {
+        's': 'BTCUSDT',  # symbole
+        'p': '50000.00', # prix
+        'm': False,      # trade type (achat)
+        'T': int(datetime.now().timestamp() * 1000)  # timestamp actuel
+    }
+    
+    # Forcer une variation importante pour déclencher l'alerte
+    def test_analyze_trade(data):
+        alert = {
+            'symbol': data['s'],
+            'price': float(data['p']),
+            'change': 6.5,  # Simulation d'un pump de 6.5%
+            'type': 'PUMP',
+            'action': 'VENDRE',
+            'tradeType': 'TEST',
+            'timestamp': datetime.fromtimestamp(int(data['T'])/1000).isoformat()
+        }
+        return alert
+    
+    # Simuler l'envoi de l'alerte
+    alert = test_analyze_trade(test_data)
+    
+    if alert and N8N_WEBHOOK_URL:
+        print("\n" + "="*50)
+        print("🧪 ALERTE TEST")
+        print(f"⚠️ {alert['type']} simulé sur {alert['symbol']} !")
+        print(f"Variation: {alert['change']}%")
+        print(f"Prix test: {alert['price']} USDT")
+        print(f"Type: {alert['tradeType']}")
+        print(f"Action suggérée: {alert['action']}")
+        print("="*50)
+        
+        headers = {'Content-Type': 'application/json'}
+        print(f"\nEnvoi de l'alerte test à {N8N_WEBHOOK_URL}")
+        response = requests.post(N8N_WEBHOOK_URL, json=alert, headers=headers)
+        print(f"Statut de la réponse: {response.status_code}")
+        
+        if response.status_code != 200:
+            print(f"Erreur lors de l'envoi de l'alerte test: {response.status_code}")
+            print(f"Réponse: {response.text}")
+            return f"Erreur lors de l'envoi de l'alerte test: {response.status_code}", 500
+        else:
+            print("Alerte test envoyée avec succès !")
+            print("="*50 + "\n")
+            return "Alerte test envoyée avec succès!", 200
+    
+    return "Erreur: N8N_WEBHOOK_URL non configurée", 500
+
 def run_flask():
     """Démarre Flask sans les logs de développement"""
     app.run(host='0.0.0.0', port=5000, debug=False)
