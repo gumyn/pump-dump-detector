@@ -144,16 +144,20 @@ def on_message(ws, message):
         print(f"Erreur lors du traitement du message: {e}")
 
 def on_error(ws, error):
-    print(f"Erreur WebSocket: {error}")
+    # Ne logger que les erreurs importantes
+    if isinstance(error, websocket.WebSocketConnectionClosedException):
+        print("⚠️ Connexion WebSocket perdue - Tentative de reconnexion...")
+    else:
+        print(f"❌ Erreur critique WebSocket: {error}")
 
 def on_close(ws, close_status_code, close_msg):
-    print("WebSocket Connection Closed")
+    print("🔄 Reconnexion au WebSocket...")
     connect_websocket()
 
 def on_open(ws):
-    print("Connection établie avec Binance")
+    print("✅ Connexion établie avec Binance")
     trading_pairs = get_trading_pairs()
-    print(f"Surveillance des paires: {trading_pairs}")
+    print(f"👀 Surveillance des paires: {trading_pairs}")
     
     subscribe_message = {
         "method": "SUBSCRIBE",
@@ -163,7 +167,13 @@ def on_open(ws):
     ws.send(json.dumps(subscribe_message))
 
 def connect_websocket():
-    # websocket.enableTrace(True)
+    # Désactiver les logs websocket
+    websocket.enableTrace(False)  # Explicitement désactiver les traces
+    
+    # Rediriger les logs de websocket-client vers null
+    import logging
+    logging.getLogger('websocket').setLevel(logging.CRITICAL)
+    
     ws = websocket.WebSocketApp("wss://stream.binance.com:9443/ws",
                               on_message=on_message,
                               on_error=on_error,
