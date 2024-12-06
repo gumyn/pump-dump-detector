@@ -12,6 +12,8 @@ load_dotenv()
 PUMP_THRESHOLD = 5  # 5% de hausse
 DUMP_THRESHOLD = -5  # 5% de baisse
 TIME_WINDOW = 5 * 60 * 1000  # 5 minutes en millisecondes
+ALERT_COOLDOWN = {}  # Pour suivre l'état des alertes par symbole
+MARKET_CALM_THRESHOLD = 2  # Seuil en % pour considérer que le marché s'est calmé
 
 # Stockage de l'historique des prix
 price_history = {}
@@ -55,8 +57,17 @@ def analyze_trade(data):
         
         change = calculate_change(symbol, price, current_time)
         
+        # Vérifier si nous sommes déjà en alerte pour ce symbole
+        is_already_alerted = symbol in ALERT_COOLDOWN
+        
         # Détecter pump ou dump
-        if change >= PUMP_THRESHOLD or change <= DUMP_THRESHOLD:
+        if (change >= PUMP_THRESHOLD or change <= DUMP_THRESHOLD) and not is_already_alerted:
+            # Première détection d'une variation importante
+            ALERT_COOLDOWN[symbol] = {
+                'type': 'PUMP' if change > 0 else 'DUMP',
+                'initial_price': price
+            }
+            
             alert = {
                 'symbol': symbol,
                 'price': price,
@@ -64,11 +75,33 @@ def analyze_trade(data):
                 'type': 'PUMP' if change > 0 else 'DUMP',
                 'action': 'VENDRE' if change > 0 and is_buy_trade else 'ACHETER' if change < 0 and not is_buy_trade else 'ATTENDRE',
                 'tradeType': 'ACHAT' if is_buy_trade else 'VENTE',
-                'timestamp': datetime.fromtimestamp(current_time/1000).isoformat()
+                'timestamp': datetime.fromtimestamp(current_time/1000).isoformat(),
+                'alert_type': 'INITIAL'
             }
-            
             return alert
             
+        elif is_already_alerted:
+            # Calculer la variation depuis le dernier prix d'alerte
+            initial_price = ALERT_COOLDOWN[symbol]['initial_price']
+            current_change = ((price - initial_price) / initial_price) * 100
+            
+            # Si le marché s'est calmé (variation revenue sous le seuil de calme)
+            if abs(current_change) <= MARKET_CALM_THRESHOLD:
+                alert_type = ALERT_COOLDOWN[symbol]['type']
+                del ALERT_COOLDOWN[symbol]  # Réinitialiser l'état d'alerte
+                
+                alert = {
+                    'symbol': symbol,
+                    'price': price,
+                    'change': round(current_change, 2),
+                    'type': alert_type,
+                    'action': 'MARCHÉ CALMÉ',
+                    'tradeType': 'STABILISATION',
+                    'timestamp': datetime.fromtimestamp(current_time/1000).isoformat(),
+                    'alert_type': 'CALM'
+                }
+                return alert
+                
     except Exception as e:
         print(f"Erreur lors de l'analyse du trade: {e}")
     
@@ -130,7 +163,7 @@ def on_open(ws):
     ws.send(json.dumps(subscribe_message))
 
 def connect_websocket():
-    websocket.enableTrace(True)
+    # websocket.enableTrace(True)
     ws = websocket.WebSocketApp("wss://stream.binance.com:9443/ws",
                               on_message=on_message,
                               on_error=on_error,
