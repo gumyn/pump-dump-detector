@@ -9,5 +9,8 @@ COPY app.py .
 # Installer les dépendances
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Exposer le port pour Flask
+EXPOSE 5000
+
 # Démarrer l'application
 CMD ["python", "app.py"]

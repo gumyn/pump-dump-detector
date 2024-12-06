@@ -1,26 +1,31 @@
-import os
+from flask import Flask
+import threading
 import websocket
 import json
 import requests
-from dotenv import load_dotenv
 from datetime import datetime
+import logging
+import os
+from dotenv import load_dotenv
 
-# Charger les variables d'environnement
+# Configuration initiale
 load_dotenv()
+app = Flask(__name__)
 
-# Configuration
-PUMP_THRESHOLD = 5  # 5% de hausse
-DUMP_THRESHOLD = -5  # 5% de baisse
-TIME_WINDOW = 5 * 60 * 1000  # 5 minutes en millisecondes
-ALERT_COOLDOWN = {}  # Pour suivre l'état des alertes par symbole
-MARKET_CALM_THRESHOLD = 2  # Seuil en % pour considérer que le marché s'est calmé
+# Désactiver les logs Flask par défaut
+log = logging.getLogger('werkzeug')
+log.setLevel(logging.ERROR)
 
-# Stockage de l'historique des prix
-price_history = {}
-
-# Récupérer l'URL du webhook et la liste des cryptos
+# Configuration websocket et variables globales (comme avant)
 N8N_WEBHOOK_URL = os.getenv('N8N_WEBHOOK_URL')
-CRYPTO_PAIRS = os.getenv('CRYPTO_PAIRS', 'BTCUSDT,ETHUSDT,BNBUSDT,ADAUSDT,DOGEUSDT')
+CRYPTO_PAIRS = os.getenv('CRYPTO_PAIRS', '').split(',')
+PUMP_THRESHOLD = 5
+DUMP_THRESHOLD = -5
+TIME_WINDOW = 5 * 60 * 1000
+ALERT_COOLDOWN = {}
+MARKET_CALM_THRESHOLD = 2
+
+price_history = {}
 
 def calculate_change(symbol, current_price, current_time):
     """Calcule la variation de prix pour une crypto donnée"""
@@ -76,7 +81,6 @@ def analyze_trade(data):
                 'action': 'VENDRE' if change > 0 and is_buy_trade else 'ACHETER' if change < 0 and not is_buy_trade else 'ATTENDRE',
                 'tradeType': 'ACHAT' if is_buy_trade else 'VENTE',
                 'timestamp': datetime.fromtimestamp(current_time/1000).isoformat(),
-                'alert_type': 'INITIAL'
             }
             return alert
             
@@ -98,7 +102,6 @@ def analyze_trade(data):
                     'action': 'MARCHÉ CALMÉ',
                     'tradeType': 'STABILISATION',
                     'timestamp': datetime.fromtimestamp(current_time/1000).isoformat(),
-                    'alert_type': 'CALM'
                 }
                 return alert
                 
@@ -203,10 +206,39 @@ def send_startup_notification():
         except Exception as e:
             print(f"❌ Erreur lors de l'envoi de la notification de démarrage: {e}")
 
+def start_websocket():
+    """Démarre le websocket Binance dans un thread séparé"""
+    websocket.enableTrace(False)
+    logging.getLogger('websocket').setLevel(logging.CRITICAL)
+    
+    ws = websocket.WebSocketApp("wss://stream.binance.com:9443/ws",
+                              on_message=on_message,
+                              on_error=on_error,
+                              on_close=on_close)
+    ws.on_open = on_open
+    ws.run_forever(ping_interval=30, ping_timeout=10)
+
+@app.route('/')
+def health_check():
+    """Endpoint simple pour vérifier que le service fonctionne"""
+    return 'OK', 200
+
+def run_flask():
+    """Démarre Flask sans les logs de développement"""
+    app.run(host='0.0.0.0', port=5000, debug=False)
+
 if __name__ == "__main__":
-    print("Démarrage du service de surveillance Binance")
+    print("🚀 Démarrage du service de surveillance Binance")
+    
     if not N8N_WEBHOOK_URL:
         print("⚠️ N8N_WEBHOOK_URL non configurée - les alertes ne seront pas envoyées")
     else:
         send_startup_notification()
-    connect_websocket() 
+    
+    # Démarrer le websocket dans un thread séparé
+    websocket_thread = threading.Thread(target=start_websocket)
+    websocket_thread.daemon = True  # Le thread s'arrêtera quand le programme principal s'arrête
+    websocket_thread.start()
+    
+    # Démarrer Flask dans le thread principal
+    run_flask() 
